@@ -1,27 +1,27 @@
 from pydantic import BaseModel
 from typing import Union
 
-class Book(BaseModel):
-    cover: str
-    pages: Union[dict[str, list[str]], None] = None
-    city: str
-    state: str
-
 class Geocode(BaseModel):
     lat: float
     lng: float
+
+class Position(BaseModel):
+    x: float
+    y: float
+
+class Transformation(BaseModel):
+    position: Position
+    scale: float
+    rotation: float
 
 class Location(BaseModel):
     name: str
     geocode: Geocode
 
-class EmptyStamp(BaseModel):
-    location: Location
-
 class Stamp(BaseModel):
     photo_url: str
     stamp_url: str
-    stamp_coords: str # Change
+    stamp_transformation: Transformation
     date: str
     notes: Union[str, None] = None
     location_name: str
@@ -34,3 +34,9 @@ class Place(BaseModel):
     formatted_address: str
     rating: float
     photo_uri: str
+
+class Book(BaseModel):
+    cover: str
+    pages: Union[dict[str, list[Location]], None] = None
+    city: str
+    state: str

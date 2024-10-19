@@ -1,3 +1,4 @@
+from collections import defaultdict
 from string import ascii_uppercase
 from typing import Union
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -7,7 +8,7 @@ import firebase_admin
 from firebase_admin import credentials, auth, db, storage
 from dotenv import load_dotenv
 import os
-from schemas import Book, EmptyStamp, Geocode, Location, Place, Stamp
+from schemas import Book, Geocode, Location, Place, Stamp, Transformation
 import base64
 import requests
 from datetime import datetime
@@ -59,7 +60,7 @@ class StampCreateRequest(BaseModel):
     geocode: Geocode
     photo_url: str
     stamp_url: str
-    stamp_coords: str
+    stamp_transformation: Transformation
     notes: Union[str, None] = None
 
 @app.get("/")
@@ -137,8 +138,18 @@ async def create_book(request: BookCreateRequest):
             "backend": "auto"
         }
         
-        response = requests.post(url, headers=headers, json=data)
-        image_data = base64.b64decode(response.json()['images'][0]['image'])
+        try:
+            response = requests.post(url, headers=headers, json=data)
+            response.raise_for_status()
+            image_data = base64.b64decode(response.json().get('images', [{}])[0].get('image', ''))
+            if not image_data:
+                raise HTTPException(status_code=500, detail="Failed to retrieve image data from the API.")
+        except requests.exceptions.RequestException as e:
+            raise HTTPException(status_code=500, detail=f"Error with the API call for image generation: {str(e)}")
+        except KeyError:
+            raise HTTPException(status_code=500, detail="Unexpected response structure from the API when generating image.")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error decoding image data: {str(e)}")
         
         blob = bucket.blob(f"ai_generated_image_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
         blob.upload_from_string(image_data, content_type='image/png')
@@ -146,11 +157,12 @@ async def create_book(request: BookCreateRequest):
 
         pages = None
         if request.attractions:
-            pages = {letter: [] for letter in ascii_uppercase}
+            pages = defaultdict(list)
             for attraction in request.attractions:
+                print(attraction)
                 starts_with = attraction.name[0].upper()
-                pages[starts_with] = EmptyStamp(
-                    location=jsonable_encoder(attraction)
+                pages[starts_with].append(
+                    jsonable_encoder(attraction)
                 )
 
         book_data = Book(
@@ -263,7 +275,7 @@ async def create_stamp(request: StampCreateRequest):
     stamp_data = Stamp(
         photo_url=request.photo_url,
         stamp_url=request.stamp_url,
-        stamp_coords=request.stamp_coords,
+        stamp_transformation=request.stamp_transformation,
         date=datetime.now().strftime("%m/%d/%Y"),
         notes=request.notes,
         location_name=request.location_name,
