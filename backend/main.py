@@ -1,6 +1,7 @@
 from string import ascii_uppercase
 from typing import Union
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import firebase_admin
 from firebase_admin import credentials, auth, db, storage
@@ -12,11 +13,20 @@ import requests
 from datetime import datetime
 from fastapi.encoders import jsonable_encoder
 from recommendation import get_place_names
-import pandas as pd
 
 load_dotenv()
 
 app = FastAPI()
+
+origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 cred = credentials.Certificate(os.getenv("FIREBASE_CREDENTIALS"))
 firebase_admin.initialize_app(cred, {
