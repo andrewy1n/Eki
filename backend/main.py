@@ -6,12 +6,13 @@ import firebase_admin
 from firebase_admin import credentials, auth, db, storage
 from dotenv import load_dotenv
 import os
-from schemas import Book, EmptyStamp, Geocode, Location, Place
+from schemas import Book, EmptyStamp, Geocode, Location, Place, Stamp
 import base64
 import requests
 from datetime import datetime
 from fastapi.encoders import jsonable_encoder
 from recommendation import get_place_names
+import pandas as pd
 
 load_dotenv()
 
@@ -43,7 +44,9 @@ class BookCreateRequest(BaseModel):
 
 class StampCreateRequest(BaseModel):
     uid: str
-    location: Location
+    bookid: str
+    location_name: str
+    geocode: Geocode
     photo_url: str
     stamp_url: str
     stamp_coords: str
@@ -158,17 +161,124 @@ async def create_book(request: BookCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/stampbook/generate-stamp-image")
-async def generate_stamp_image(request: str):
-    return {}
+async def generate_stamp_image(reference_image: UploadFile = File(...)):
+    try:
+        # Read and encode the reference image to base64
+        file_content = await reference_image.read()
+        base64_img = base64.b64encode(file_content).decode('utf-8')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading the image: {str(e)}")
+
+    api = "https://api.hyperbolic.xyz/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {os.getenv('HYPERBOLIC_API_KEY')}",
+    }
+
+    payload = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image to someone who would draw it without the reference image. Make sure to be detailed."},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"},
+                    },
+                ],
+            }
+        ],
+        "model": "meta-llama/Llama-3.2-90B-Vision-Instruct",
+        "max_tokens": 2048,
+        "temperature": 0.7,
+        "top_p": 0.9,
+    }
+
+    try:
+        response = requests.post(api, headers=headers, json=payload)
+        response.raise_for_status()
+        description = response.json().get('choices', [{}])[0].get('message', {}).get('content', '')
+        if not description:
+            raise HTTPException(status_code=500, detail="Failed to retrieve description from API.")
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Error with the API call for description: {str(e)}")
+    except KeyError:
+        raise HTTPException(status_code=500, detail="Unexpected response structure from the API when fetching description.")
+
+    # Draw reference image
+    url = "https://api.hyperbolic.xyz/v1/image/generation"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {os.getenv('HYPERBOLIC_API_KEY')}"
+    }
+
+    data = {
+        "model_name": "FLUX.1-dev",
+        "prompt": description,
+        "steps": 30,
+        "cfg_scale": 5,
+        "enable_refiner": False,
+        "height": 1024,
+        "width": 1024,
+        "backend": "auto"
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        image_data = base64.b64decode(response.json().get('images', [{}])[0].get('image', ''))
+        if not image_data:
+            raise HTTPException(status_code=500, detail="Failed to retrieve image data from the API.")
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Error with the API call for image generation: {str(e)}")
+    except KeyError:
+        raise HTTPException(status_code=500, detail="Unexpected response structure from the API when generating image.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error decoding image data: {str(e)}")
+
+    try:
+        blob = bucket.blob(f"ai_generated_image_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+        blob.upload_from_string(image_data, content_type='image/png')
+        download_url = blob.public_url
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error uploading image to storage: {str(e)}")
+    
+    return {
+        'message': 'Stamp successfully generated',
+        'image_url': download_url
+    }
 
 @app.post("/stampbook/create-stamp")
 async def create_stamp(request: StampCreateRequest):
-    return {}
+    stamp_data = Stamp(
+        photo_url=request.photo_url,
+        stamp_url=request.stamp_url,
+        stamp_coords=request.stamp_coords,
+        date=datetime.now().strftime("%m/%d/%Y"),
+        notes=request.notes,
+        location_name=request.location_name,
+        geocode=request.geocode
+    )
+
+    ref = db.reference(f"/users/{request.uid}/books/{request.bookid}/pages")
+    pages = ref.get()
+
+    if pages is None:
+        pages = {letter: [] for letter in ascii_uppercase}
+    
+    first_letter = request.location_name[0].upper()
+    pages[first_letter].append(jsonable_encoder(stamp_data))
+
+    ref.set(pages)
+    
+    return {
+        "message": "Stamp created successfully",
+        "stamp_data": jsonable_encoder(stamp_data)
+    }
 
 @app.get("/travel/rec")
 async def travel_rec(city: str, state: str):
     try:
-        
         place_names = get_place_names(f"{city}, {state}")
         
         output = {
@@ -224,5 +334,51 @@ async def travel_rec(city: str, state: str):
                 continue
         
         return output
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get('/stampbook')
+async def get_stampbooks(uid: str):
+    try:
+        ref = db.reference(f"/users/{uid}/books")
+
+        books = ref.get()
+
+        if books is None:
+            print('No books found.')
+            return
+        
+        stampbook_data = {
+            'stampbooks': []
+        }
+
+        for book_id, book_info in books.items():
+            stampbook_data['stampbooks'].append({
+                'book_id': book_id,
+                'city': book_info['city'],
+                'state': book_info['state'],
+                'cover': book_info['cover']
+            })
+        
+        return {
+            'message': f'Stampbooks for user: {uid}',
+            'stampbook_data': stampbook_data
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get('/stampbook/{book_id}')
+async def get_book_pages(uid: str, book_id: str):
+    try:
+        ref = db.reference(f"/users/{uid}/books/{book_id}/pages")
+
+        stampbook_pages = ref.get()
+        
+        return {
+            'message': f'Stampbook {book_id} for user: {uid}',
+            'stampbook_pages': stampbook_pages
+        }
+    
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

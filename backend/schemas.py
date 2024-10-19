@@ -3,7 +3,7 @@ from typing import Union
 
 class Book(BaseModel):
     cover: str
-    pages: dict[str, list[str]]
+    pages: Union[dict[str, list[str]], None] = None
     city: str
     state: str
 
@@ -12,8 +12,6 @@ class Geocode(BaseModel):
     lng: float
 
 class Location(BaseModel):
-    city: str
-    state: str
     name: str
     geocode: Geocode
 
@@ -24,9 +22,10 @@ class Stamp(BaseModel):
     photo_url: str
     stamp_url: str
     stamp_coords: str # Change
-    time: str
+    date: str
     notes: Union[str, None] = None
-    location: Location
+    location_name: str
+    geocode: Geocode
 
 class Place(BaseModel):
     display_name: str

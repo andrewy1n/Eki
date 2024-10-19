@@ -28,7 +28,7 @@ def get_place_names(location: str):
         {
             "role": "user",
             "content": """Return a list of the names of 5 attractions in a list format,
-            ex. [place1, place2, place3]"""
+            ex. [place1, place2, place3, place4, place5]"""
         }
     ]
 
