@@ -1,37 +1,24 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
-
-import { TabBarIcon } from '@/components/navigation/TabBarIcon';
-import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import TabSlider from '@/components/TabSlider';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
 
   return (
     <Tabs
+      initialRouteName="map"
+      tabBar={(props) => <TabSlider {...props} />}
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarShowLabel: false,
         headerShown: false,
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color, focused }) => (
-            <TabBarIcon name={focused ? 'home' : 'home-outline'} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          title: 'Explore',
-          tabBarIcon: ({ color, focused }) => (
-            <TabBarIcon name={focused ? 'code-slash' : 'code-slash-outline'} color={color} />
-          ),
-        }}
-      />
+      }}
+    >
+      <Tabs.Screen name="map" options={{ title: 'Map' }} />
+      <Tabs.Screen name="stampbooks" options={{ title: 'Stampbooks' }} />
+      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
+      <Tabs.Screen name="community" options={{ title: 'Community' }} />
     </Tabs>
   );
 }
