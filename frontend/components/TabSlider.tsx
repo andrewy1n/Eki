@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const { width } = Dimensions.get('window');
 
 const TabSlider: React.FC<BottomTabBarProps> = ({ state, descriptors, navigation }) => {
-  const insets = useSafeAreaInsets();
+  const insets = useSafeAreaInsets()
   const translateX = React.useRef(new Animated.Value(state.index * (width / state.routes.length))).current;
 ;
 
