@@ -1,4 +1,6 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+// components/PageSpinner.tsx
+import DraggableImage from './DraggableImage';
+import React, { useRef, useContext, useEffect, useCallback } from 'react';
 import {
   ScrollView,
   View,
@@ -8,9 +10,17 @@ import {
   Dimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  TouchableOpacity,
+  Image,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { useRouter } from 'expo-router';
+import Feather from '@expo/vector-icons/Feather';
+import { PagesContext } from '../context/PagesContext';
+import { Page } from '@/models/Page';
+import uuid from 'react-native-uuid';
 
 const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 const screenWidth = Dimensions.get('window').width;
@@ -18,10 +28,27 @@ const pageWidth = screenWidth * 0.8; // 80% of screen width
 const letterWidth = 50; // Width of each letter in the Spinner
 const centerOffset = (screenWidth - letterWidth) / 2; // To center the selected letter
 
-const PageSpinner = () => {
+interface PageSpinnerProps {
+  stampbookId: string;
+}
+
+const PageSpinner: React.FC<PageSpinnerProps> = ({ stampbookId }) => {
+  const router = useRouter();
   const scrollViewRef = useRef<ScrollView>(null);
-  const flatListRef = useRef<FlatList>(null);
-  const [selectedLetterIndex, setSelectedLetterIndex] = useState(0);
+  const flatListRef = useRef<FlatList<Page>>(null);
+  const { stampbooks, addPage } = useContext(PagesContext);
+
+  const stampbook = stampbooks.find((sb) => sb.id === stampbookId);
+
+  if (!stampbook) {
+    Alert.alert('Error', 'Stampbook not found.');
+    return null; // Or handle accordingly
+  }
+
+  const pages = stampbook.pages;
+  const [selectedLetterIndex, setSelectedLetterIndex] = React.useState(0);
+
+  const maxIndex = pages.length - 1; // Maximum index for FlatList
 
   // Flags to prevent reciprocal updates
   const isScrollViewProgrammatic = useRef(false);
@@ -29,14 +56,6 @@ const PageSpinner = () => {
 
   // Ref to keep track of the last haptics-triggered letter index
   const lastHapticsLetterIndex = useRef(selectedLetterIndex);
-
-  // Generate pages: 5 pages per letter
-  const pages = letters.reduce((acc: string[], letter: string) => {
-    const letterPages = Array.from({ length: 5 }, (_, i) => `${letter} Page ${i + 1}`);
-    return [...acc, ...letterPages];
-  }, []);
-
-  const maxIndex = pages.length - 1; // Maximum index for FlatList
 
   // Effect to handle haptic feedback when selectedLetterIndex changes
   useEffect(() => {
@@ -72,7 +91,7 @@ const PageSpinner = () => {
         setSelectedLetterIndex(index);
 
         // Calculate the target page index for the FlatList
-        const targetPageIndex = index * 5;
+        const targetPageIndex = index * 5; // Assuming 5 pages per letter
 
         if (targetPageIndex >= 0 && targetPageIndex <= maxIndex) {
           isFlatListProgrammatic.current = true; // Indicate FlatList is being updated programmatically
@@ -100,7 +119,7 @@ const PageSpinner = () => {
 
       const offsetX = nativeEvent.contentOffset.x;
       const index = Math.round(offsetX / screenWidth);
-      const letterIndex = Math.floor(index / 5); // Each letter has 5 pages
+      const letterIndex = Math.floor(index / 5); // Assuming 5 pages per letter
 
       // Clamp the letter index within valid range
       const clampedLetterIndex = Math.max(0, Math.min(letterIndex, letters.length - 1));
@@ -119,25 +138,68 @@ const PageSpinner = () => {
   );
 
   // Handle scrollToIndex failure (e.g., if the index is out of bounds)
-  const onFlatListScrollToIndexFailed = useCallback(
-    (info: { index: number; highestMeasuredFrameIndex: number }) => {
-      const wait = setTimeout(() => {
-        flatListRef.current?.scrollToIndex({ index: info.index, animated: true });
-      }, 500); // Wait for 500ms
+  const onFlatListScrollToIndexFailed = useCallback((info: { index: number; highestMeasuredFrameIndex: number; averageItemLength: number }) => {
+    const wait = setTimeout(() => {
+      flatListRef.current?.scrollToIndex({ index: info.index, animated: true });
+    }, 500); // Wait for 500ms
 
-      return () => clearTimeout(wait);
-    },
-    []
-  );
+    return () => clearTimeout(wait);
+  }, []);
 
-  // Render a page for the FlatList
-  const renderItem = ({ item }: { item: string }) => (
-    <View style={styles.pageContainer}>
+  // Render a page for the FlatList with navigation
+  const renderItem = ({ item }: { item: Page }) => {
+    // Determine the action based on whether the page is stamped or empty
+    const handlePagePress = () => {
+      if (item.stamped) {
+        // If the page is stamped, navigate to the stamped page viewer
+        router.push({
+          pathname: '/stampededitor', // Adjust the path to your stamped page viewer screen
+          params: {
+            stampbookId: stampbookId,
+            pageId: item.id,
+          },
+        });
+      } else {
+        // If the page is empty, navigate to the page editor to stamp the page
+        router.push({
+          pathname: '/emptyeditor',
+          params: {
+            stampbookId: stampbookId,
+            pageId: item.id,
+          },
+        });
+      }
+    };
+
+    return (
+      <TouchableOpacity style={styles.pageContainer} onPress={handlePagePress}>
       <View style={styles.page}>
-        <Text style={styles.pageText}>{item}</Text>
+        {/* Display the main image with its transformations */}
+        {item.imageUri ? (
+          <DraggableImage
+            imageUri={item.imageUri}
+            borderRadius={15}
+            readonly
+            transformations={item.imageTransformations} // Apply saved image transformations
+          />
+        ) : (
+          <Feather name="camera" size={50} color="#000" />
+        )}
+
+        {/* Display the stamps */}
+        {item.stamps.map((stamp) => (
+          <DraggableImage
+            key={stamp.id}
+            imageUri={stamp.imageUri}
+            borderRadius={stamp.borderRadius}
+            readonly
+            transformations={stamp.transformations} // Apply saved stamp transformations
+          />
+        ))}
       </View>
-    </View>
-  );
+    </TouchableOpacity>
+    );
+  };
 
   // Provide the layout of each item in the FlatList for scrollToIndex
   const getItemLayout = (_: any, index: number) => ({
@@ -169,12 +231,12 @@ const PageSpinner = () => {
 
   return (
     <View style={styles.container}>
-      {/* FlatList displaying pages for each letter */}
+      {/* FlatList displaying pages */}
       <FlatList
         ref={flatListRef}
         data={pages}
         renderItem={renderItem}
-        keyExtractor={(item, index) => `${item}-${index}`}
+        keyExtractor={(item) => item.id}
         horizontal
         showsHorizontalScrollIndicator={false}
         snapToInterval={screenWidth} // Ensure snapping happens per page width
@@ -188,7 +250,12 @@ const PageSpinner = () => {
       {/* Spinner */}
       <View style={styles.spinnerContainer}>
         <LinearGradient
-          colors={['white', 'rgba(242, 242, 242, 0.8)', 'rgba(242, 242, 242, 0.1)', 'rgba(242, 242, 242, 0)']}
+          colors={[
+            'rgba(242, 242, 242, 1)',
+            'rgba(242, 242, 242, 0.8)',
+            'rgba(242, 242, 242, 0.1)',
+            'rgba(242, 242, 242, 0)',
+          ]}
           style={styles.leftFade}
           start={[0, 0]}
           end={[1, 0]}
@@ -211,7 +278,9 @@ const PageSpinner = () => {
               <Text
                 style={[
                   styles.letter,
-                  index === selectedLetterIndex ? styles.selectedLetter : styles.unselectedLetter,
+                  index === selectedLetterIndex
+                    ? styles.selectedLetter
+                    : styles.unselectedLetter,
                 ]}
               >
                 {letter}
@@ -221,7 +290,12 @@ const PageSpinner = () => {
         </ScrollView>
 
         <LinearGradient
-          colors={['rgba(242, 242, 242, 0)', 'rgba(242, 242, 242, 0.1)', 'rgba(242, 242, 242, 0.8)', 'white']}
+          colors={[
+            'rgba(242, 242, 242, 0)',
+            'rgba(242, 242, 242, 0.1)',
+            'rgba(242, 242, 242, 0.8)',
+            'rgba(242, 242, 242, 1)',
+          ]}
           style={styles.rightFade}
           start={[0, 0]}
           end={[1, 0]}
@@ -233,6 +307,8 @@ const PageSpinner = () => {
     </View>
   );
 };
+
+export default PageSpinner;
 
 const styles = StyleSheet.create({
   container: {
@@ -257,9 +333,10 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 5,
   },
-  pageText: {
-    fontSize: 24,
-    fontWeight: 'bold',
+  stampedImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 10,
   },
   spinnerContainer: {
     position: 'absolute',
@@ -299,17 +376,15 @@ const styles = StyleSheet.create({
   leftFade: {
     position: 'absolute',
     left: 0,
-    width: letterWidth * 2, // 100
+    width: letterWidth * 4,
     height: '100%',
     zIndex: 1,
   },
   rightFade: {
     position: 'absolute',
     right: 0,
-    width: letterWidth * 2, // 100
+    width: letterWidth * 4,
     height: '100%',
     zIndex: 1,
   },
 });
-
-export default PageSpinner;

@@ -1,14 +1,31 @@
-import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
+import React, { useEffect, useContext } from 'react';
+import { Alert, StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import PageSpinner from '@/components/PageSpinner';
-
+import { PagesContext } from '../context/PagesContext';
+import { Stampbook } from '../models/Stampbook';
 
 const StampPage: React.FC = () => {
   const router = useRouter();
-  const { id, city, state } = useLocalSearchParams();
+  const { stampbookId } = useLocalSearchParams<{ stampbookId: string }>();
+  const { stampbooks } = useContext(PagesContext);
+
+  useEffect(() => {
+    if (!stampbookId) {
+      Alert.alert('Error', 'No stampbook ID provided.');
+      router.back();
+      return;
+    }
+
+    const stampbook = stampbooks.find((sb) => sb.id === stampbookId);
+    if (!stampbook) {
+      Alert.alert('Error', 'Stampbook not found.');
+      router.back();
+      return;
+    }
+  }, [stampbookId, stampbooks, router]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -25,12 +42,12 @@ const StampPage: React.FC = () => {
             style={styles.backButton}
           />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{city + ', ' + state}</Text>
+        <Text style={styles.headerTitle}>city, state</Text>
       </View>
 
       {/* Page Content */}
       <View style={styles.content}>
-        <PageSpinner/>
+        <PageSpinner stampbookId={stampbookId}/>
       </View>
     </SafeAreaView>
   );

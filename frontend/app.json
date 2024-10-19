@@ -27,6 +27,12 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow $(Eki) to use your location."
+        }
+      ],
       "expo-router"
     ],
     "experiments": {
