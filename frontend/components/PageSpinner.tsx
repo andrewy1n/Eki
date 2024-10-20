@@ -1,4 +1,3 @@
-// components/PageSpinner.tsx
 import DraggableImage from './DraggableImage';
 import React, { useRef, useContext, useEffect, useCallback } from 'react';
 import {
@@ -18,37 +17,34 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
-import { PagesContext } from '../context/PagesContext';
 import { Page } from '@/models/Page';
-import uuid from 'react-native-uuid';
+import { useAccountContext } from '@/context/AccountContext';
 
-const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 const screenWidth = Dimensions.get('window').width;
 const pageWidth = screenWidth * 0.8; // 80% of screen width
 const letterWidth = 50; // Width of each letter in the Spinner
-const centerOffset = (screenWidth - letterWidth) / 2; // To center the selected letter
+const centerOffset = (screenWidth - letterWidth) / 2;
 
-interface PageSpinnerProps {
-  stampbookId: string;
-}
-
-const PageSpinner: React.FC<PageSpinnerProps> = ({ stampbookId }) => {
+const PageSpinner: React.FC<{ index: number }> = ({ index }) => {
   const router = useRouter();
   const scrollViewRef = useRef<ScrollView>(null);
   const flatListRef = useRef<FlatList<Page>>(null);
-  const { stampbooks, addPage } = useContext(PagesContext);
+  const { accountData } = useAccountContext();
 
-  const stampbook = stampbooks.find((sb) => sb.id === stampbookId);
+  const stampbooks = accountData?.books || [];
+  const book = stampbooks[index];
 
-  if (!stampbook) {
+  if (!book) {
     Alert.alert('Error', 'Stampbook not found.');
-    return null; // Or handle accordingly
+    return null;
   }
 
-  const pages = stampbook.pages;
-  const [selectedLetterIndex, setSelectedLetterIndex] = React.useState(0);
+  const pages = book.pages;
+  const letters = Object.keys(pages); // Get all the keys (letters) from the pages object
+  const [selectedLetterIndex, setSelectedLetterIndex] = React.useState(0); // State for tracking the spinner
+  const selectedLetter = letters[selectedLetterIndex]; // Get the selected letter based on index
 
-  const maxIndex = pages.length - 1; // Maximum index for FlatList
+  const pagesForSelectedLetter = pages[selectedLetter]; // Pages for the currently selected letter
 
   // Flags to prevent reciprocal updates
   const isScrollViewProgrammatic = useRef(false);
@@ -59,215 +55,124 @@ const PageSpinner: React.FC<PageSpinnerProps> = ({ stampbookId }) => {
 
   // Effect to handle haptic feedback when selectedLetterIndex changes
   useEffect(() => {
-    // Trigger haptics only when the letter index changes
     if (lastHapticsLetterIndex.current !== selectedLetterIndex) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       lastHapticsLetterIndex.current = selectedLetterIndex;
     }
   }, [selectedLetterIndex]);
 
-  // Handle ScrollView's momentum scroll end
+  // Handle ScrollView's momentum scroll end (for the spinner)
   const handleScrollViewMomentumEnd = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       if (isScrollViewProgrammatic.current) {
-        // Reset the flag and exit to prevent reciprocal update
         isScrollViewProgrammatic.current = false;
         return;
       }
 
       const { nativeEvent } = event;
-      if (!nativeEvent) {
-        console.warn('ScrollView event has no nativeEvent');
-        return;
-      }
-
       const offsetX = nativeEvent.contentOffset.x;
       let index = Math.round(offsetX / letterWidth);
 
-      // Clamp the index within valid range
+      // Clamp the index within the valid range
       index = Math.max(0, Math.min(index, letters.length - 1));
 
       if (index !== selectedLetterIndex) {
-        setSelectedLetterIndex(index);
-
-        // Calculate the target page index for the FlatList
-        const targetPageIndex = index * 5; // Assuming 5 pages per letter
-
-        if (targetPageIndex >= 0 && targetPageIndex <= maxIndex) {
-          isFlatListProgrammatic.current = true; // Indicate FlatList is being updated programmatically
-          flatListRef.current?.scrollToIndex({ index: targetPageIndex, animated: true });
-        }
+        setSelectedLetterIndex(index); // Update the selected letter index
       }
     },
-    [selectedLetterIndex, maxIndex]
+    [selectedLetterIndex, letters.length]
   );
 
   // Handle FlatList's momentum scroll end
   const handleFlatListMomentumEnd = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       if (isFlatListProgrammatic.current) {
-        // Reset the flag and exit to prevent reciprocal update
         isFlatListProgrammatic.current = false;
         return;
       }
 
-      const { nativeEvent } = event;
-      if (!nativeEvent) {
-        console.warn('FlatList event has no nativeEvent');
-        return;
-      }
-
-      const offsetX = nativeEvent.contentOffset.x;
+      const offsetX = event.nativeEvent.contentOffset.x;
       const index = Math.round(offsetX / screenWidth);
-      const letterIndex = Math.floor(index / 5); // Assuming 5 pages per letter
+      const letterIndex = Math.floor(index / 5); // Adjust based on pages per letter
 
-      // Clamp the letter index within valid range
       const clampedLetterIndex = Math.max(0, Math.min(letterIndex, letters.length - 1));
 
       if (clampedLetterIndex !== selectedLetterIndex) {
         setSelectedLetterIndex(clampedLetterIndex);
 
-        isScrollViewProgrammatic.current = true; // Indicate ScrollView is being updated programmatically
+        isScrollViewProgrammatic.current = true;
         scrollViewRef.current?.scrollTo({
           x: clampedLetterIndex * letterWidth,
           animated: true,
         });
       }
     },
-    [selectedLetterIndex]
+    [selectedLetterIndex, letters.length]
   );
 
-  // Handle scrollToIndex failure (e.g., if the index is out of bounds)
-  const onFlatListScrollToIndexFailed = useCallback((info: { index: number; highestMeasuredFrameIndex: number; averageItemLength: number }) => {
-    const wait = setTimeout(() => {
-      flatListRef.current?.scrollToIndex({ index: info.index, animated: true });
-    }, 500); // Wait for 500ms
-
-    return () => clearTimeout(wait);
-  }, []);
-
-  // Render a page for the FlatList with navigation
+  // Render a page for the FlatList
   const renderItem = ({ item }: { item: Page }) => {
-    // Determine the action based on whether the page is stamped or empty
-    const handlePagePress = () => {
-      if (item.stamped) {
-        // If the page is stamped, navigate to the stamped page viewer
-        router.push({
-          pathname: '/stampededitor', // Adjust the path to your stamped page viewer screen
-          params: {
-            stampbookId: stampbookId,
-            pageId: item.id,
-          },
-        });
-      } else {
-        // If the page is empty, navigate to the page editor to stamp the page
-        router.push({
-          pathname: '/emptyeditor',
-          params: {
-            stampbookId: stampbookId,
-            pageId: item.id,
-          },
-        });
-      }
-    };
+    // const handlePagePress = () => {
+    //   router.push({
+    //     pathname: item.stamped ? '/stampededitor' : '/emptyeditor', // Adjust based on whether the page is stamped or empty
+    //     params: {
+    //       stampbookId: book.id,
+    //       pageId: item.id,
+    //     },
+    //   });
+    // };
 
     return (
-      <TouchableOpacity style={styles.pageContainer} onPress={handlePagePress}>
-      <View style={styles.page}>
-        {/* Display the main image with its transformations */}
-        {item.imageUri ? (
-          <DraggableImage
-            imageUri={item.imageUri}
-            borderRadius={15}
-            readonly
-            transformations={item.imageTransformations} // Apply saved image transformations
-          />
-        ) : (
-          <Feather name="camera" size={50} color="#000" />
-        )}
-
-        {/* Display the stamps */}
-        {item.stamps.map((stamp) => (
-          <DraggableImage
-            key={stamp.id}
-            imageUri={stamp.imageUri}
-            borderRadius={stamp.borderRadius}
-            readonly
-            transformations={stamp.transformations} // Apply saved stamp transformations
-          />
-        ))}
-      </View>
-    </TouchableOpacity>
+      <TouchableOpacity style={styles.pageContainer}>
+        <View style={styles.page}>
+          {item.photo_url ? (
+            <>
+              <Text>{item.location_name}</Text>
+              <Image source={{uri: item.photo_url}} borderRadius={15} />
+              <DraggableImage key={item.stamp_url} imageUri={item.stamp_url} readonly transformations={item.stamp_transformation} />
+            </>
+          ) : (
+            <>
+              {console.log(item.location_name)}
+              <Text style={styles.location}>{item.location_name}</Text>
+              <Feather name="camera" size={50} color="#000" />
+            </>
+          )}
+        </View>
+      </TouchableOpacity>
     );
   };
 
-  // Provide the layout of each item in the FlatList for scrollToIndex
-  const getItemLayout = (_: any, index: number) => ({
-    length: screenWidth, // Keep the screen width for paging purposes
-    offset: screenWidth * index, // Offset is screenWidth multiplied by index
-    index,
-  });
-
-  // Handle the ScrollView's onScroll event to trigger haptics for every letter passed
-  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { nativeEvent } = event;
-    if (!nativeEvent) {
-      return;
-    }
-    const offsetX = nativeEvent.contentOffset.x;
-    const currentLetterIndex = Math.round(offsetX / letterWidth);
-    const clampedIndex = Math.max(0, Math.min(currentLetterIndex, letters.length - 1));
-
-    if (clampedIndex !== lastHapticsLetterIndex.current) {
-      // Update the last haptics letter index
-      lastHapticsLetterIndex.current = clampedIndex;
-
-      // Trigger haptics only if the scroll is not programmatic
-      if (!isScrollViewProgrammatic.current && !isFlatListProgrammatic.current) {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      }
-    }
-  }, []);
-
   return (
     <View style={styles.container}>
-      {/* FlatList displaying pages */}
+      {/* FlatList displaying pages for the selected letter */}
       <FlatList
         ref={flatListRef}
-        data={pages}
+        data={pagesForSelectedLetter} // Dynamically use pages based on selected letter
         renderItem={renderItem}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item.location_name}
         horizontal
         showsHorizontalScrollIndicator={false}
         snapToInterval={screenWidth} // Ensure snapping happens per page width
         decelerationRate="fast"
-        getItemLayout={getItemLayout}
         onMomentumScrollEnd={handleFlatListMomentumEnd}
-        onScrollToIndexFailed={onFlatListScrollToIndexFailed}
-        initialScrollIndex={0}
+        initialScrollIndex={0} // Reset to the first page of the selected letter
       />
 
       {/* Spinner */}
       <View style={styles.spinnerContainer}>
         <LinearGradient
-          colors={[
-            'rgba(242, 242, 242, 1)',
-            'rgba(242, 242, 242, 0.8)',
-            'rgba(242, 242, 242, 0.1)',
-            'rgba(242, 242, 242, 0)',
-          ]}
+          colors={['rgba(242, 242, 242, 1)', 'rgba(242, 242, 242, 0.8)', 'rgba(242, 242, 242, 0.1)', 'rgba(242, 242, 242, 0)']}
           style={styles.leftFade}
           start={[0, 0]}
           end={[1, 0]}
           pointerEvents="none"
         />
-
         <ScrollView
           ref={scrollViewRef}
           horizontal
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={handleScrollViewMomentumEnd}
-          onScroll={handleScroll} // Added onScroll handler for haptics
           scrollEventThrottle={16}
           snapToInterval={letterWidth} // Snap to the width of each letter
           decelerationRate="fast"
@@ -275,38 +180,25 @@ const PageSpinner: React.FC<PageSpinnerProps> = ({ stampbookId }) => {
         >
           {letters.map((letter, index) => (
             <View key={index} style={styles.letterBox}>
-              <Text
-                style={[
-                  styles.letter,
-                  index === selectedLetterIndex
-                    ? styles.selectedLetter
-                    : styles.unselectedLetter,
-                ]}
-              >
+              <Text style={[styles.letter, index === selectedLetterIndex ? styles.selectedLetter : styles.unselectedLetter]}>
                 {letter}
               </Text>
             </View>
           ))}
         </ScrollView>
-
         <LinearGradient
-          colors={[
-            'rgba(242, 242, 242, 0)',
-            'rgba(242, 242, 242, 0.1)',
-            'rgba(242, 242, 242, 0.8)',
-            'rgba(242, 242, 242, 1)',
-          ]}
+          colors={['rgba(242, 242, 242, 0)', 'rgba(242, 242, 242, 0.1)', 'rgba(242, 242, 242, 0.8)', 'rgba(242, 242, 242, 1)']}
           style={styles.rightFade}
           start={[0, 0]}
           end={[1, 0]}
           pointerEvents="none"
         />
-
         <View style={styles.selectionBox} />
       </View>
     </View>
   );
 };
+
 
 export default PageSpinner;
 
@@ -314,6 +206,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f2f2f2',
+    width: '100%',
   },
   pageContainer: {
     width: screenWidth,
@@ -386,5 +279,10 @@ const styles = StyleSheet.create({
     width: letterWidth * 4,
     height: '100%',
     zIndex: 1,
+  },
+  location: {
+    position: 'absolute',
+    justifyContent: 'center',
+    alignSelf:'center',
   },
 });

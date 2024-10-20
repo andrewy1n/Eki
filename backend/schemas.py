@@ -9,19 +9,24 @@ class Position(BaseModel):
     x: float
     y: float
 
+class Size(BaseModel):
+    width: float
+    height: float
+
 class Transformation(BaseModel):
     position: Position
     scale: float
     rotation: float
 
 class Location(BaseModel):
-    name: str
+    location_name: str
     geocode: Geocode
 
 class Stamp(BaseModel):
     photo_url: str
     stamp_url: str
     stamp_transformation: Transformation
+    stamp_size: Size
     date: str
     notes: Union[str, None] = None
     location_name: str

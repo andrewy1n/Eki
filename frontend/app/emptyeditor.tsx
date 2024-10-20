@@ -1,7 +1,7 @@
-// app/pageeditor.tsx
-
-import React, { useState, useContext, useEffect } from 'react';
+// EmptyEditor.tsx (Corrected)
+import React, { useState, useCallback, useEffect } from 'react';
 import {
+  Image,
   View,
   Text,
   StyleSheet,
@@ -13,104 +13,76 @@ import {
   Platform,
   TouchableWithoutFeedback,
   Keyboard,
+  ActivityIndicator,
 } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import DraggableImage from '../components/DraggableImage';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { PagesContext } from '../context/PagesContext';
-import { Page, Transformations } from '../models/Page';
-import uuid from 'react-native-uuid';
-import * as Location from 'expo-location';
+import { Transformations } from '../models/Page';
+import { genStamp, createStamp, uploadPhoto } from '@/utils/endpoints';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAccountContext } from '@/context/AccountContext';
+import { Stampbook } from '../models/Stampbook';
+import DraggableImage from '@/components/DraggableImage';
 
-const PageEditor: React.FC = () => {
+const EmptyEditor: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { pageId, stampbookId } = useLocalSearchParams<{
-    pageId: string;
-    stampbookId: string;
-  }>();
-  const { stampbooks, updatePage, addPage, addStamp, addLocation } = useContext(PagesContext);
-
-  const [imageUri, setImageUri] = useState<string | null>(null);
-  const [notes, setNotes] = useState<string>('');
-  const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [stampUri, setStampUri] = useState<string | null>(null);
-  const [isPlaced, setIsPlaced] = useState(false); // New state to track if 'Place' button is pressed
-  const [transformations, setTransformations] = useState<Transformations>({
-    position: { x: 0, y: 0 },
-    scale: 1,
-    rotation: 0,
-  });
-  const [imageTransformations, setImageTransformations] = useState<Transformations>({
-    position: { x: 0, y: 0 },
-    scale: 1,
-    rotation: 0,
-  });
+  const { ind, currLetter, currIndex } = useLocalSearchParams<{ ind: string, currLetter: string, currIndex: string }>();
   
-  const handleUpdateImageTransformations = (transform: Transformations) => {
-    setImageTransformations(transform); // Update image transformations state
-  };
+  const [notes, setNotes] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(false);
+  const { accountData } = useAccountContext();
+  
+  const [bookid, setBookid] = useState<string>('');
+  const [location_name, setLocation_name] = useState<string>('');
+  const [geocode, setGeocode] = useState<{ lat: number, lng: number }>({ lat: 10, lng: 10 });
+  const [photo_url, setPhoto_url] = useState<string>('');
+  const [stamp_url, setStamp_url] = useState<string>('');
+  const [stamp_size, setStamp_size] = useState<{ width: number, height: number }>({ width: 0, height: 0 });
+  
+  const [stamp_transformation, setStamp_transformation] = useState<Transformations>({
+    position: {
+      x: 0,
+      y: 0,
+    },
+    scale: 1.0,
+    rotation: 0,
+  });
 
-  const handleUpdateTransformations = (transform: Transformations) => {
-    setTransformations(transform); // Update state with the new transformations
-  };
-
-
-  // Function to place the picture (trigger the stamp)
-  const handlePlacePicture = () => {
-    if (!imageUri) {
-      Alert.alert('Error', 'No image selected to place.');
-      return;
-    }
-    setIsPlaced(true); // Mark the image as placed (stamped)
-  };
-
-  // // Function to reset stamping (undo the placement)
-  // const handleUndoStamp = () => {
-  //   setIsPlaced(false); // Reset placement
-  // };
+  const books: Stampbook[] = accountData?.books || [];
+  const i = Number(ind);
+  const currentIndex = Number(currIndex);
 
   useEffect(() => {
-    if (!pageId || !stampbookId) {
-      Alert.alert('Error', 'No page ID or stampbook ID provided.');
+    if (isNaN(i) || i < 0 || i >= books.length) {
+      Alert.alert('Error', 'No valid stampbook index provided.');
       router.back();
       return;
     }
-
-    // Find the stampbook
-    const stampbook = stampbooks.find((sb) => sb.id === stampbookId);
-    if (!stampbook) {
-      Alert.alert('Error', 'Stampbook not found.');
+    const page = books[i].pages[currLetter]?.[currentIndex];
+    if (!page) {
+      Alert.alert('Error', 'No page found for the given letter and index.');
       router.back();
       return;
     }
+    const bkid = String(books[i].id);
+    const locnam = String(page.location_name);
+    const geoc = {
+      lat: 10,
+      lng: 10,
+    };
+    setNotes(page?.notes || '');
+    setBookid(bkid);
+    setLocation_name(locnam);
+    setGeocode(geoc);
+  }, [ind, books, router, currLetter, currentIndex, i]);
 
-    // Find or create the page
-    let existingPage = stampbook.pages.find((page: Page) => page.id === pageId);
-    if (!existingPage) {
-      const newPage: Page = {
-        id: pageId,
-        stampbookId: stampbookId,
-        imageUri: null,
-        imageTransformations: undefined,
-        stamps: [],
-        notes: '',
-        location: null,
-        stamped: false,
-      };
-      addPage(stampbookId, newPage);
-      existingPage = newPage;
-    }
-
-    // Set initial state from the existing page
-    setImageUri(existingPage.imageUri);
-    setNotes(existingPage.notes);
-    setLocation(existingPage.location);
-    // Stamps are handled separately via addStamp
-  }, [pageId, stampbookId, stampbooks, addPage, router]);
+  const handleUpdateStampTransformations = (transform: any) => {
+    setStamp_transformation(transform);
+  };
 
   const handleTakePicture = async () => {
     const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
@@ -123,45 +95,67 @@ const PageEditor: React.FC = () => {
     const result = await ImagePicker.launchCameraAsync();
 
     if (!result.canceled) {
-      setImageUri(result.assets[0].uri);
+      setPhoto_url(result.assets[0].uri);
+      // After the image is taken, run genStamp and show loading
+      await handleGenerateStamp(result.assets[0].uri);
     }
   };
 
-  const handleGenerateStamp = () => {
-    // Implement your generate stamp logic here
-    Alert.alert('Generate Stamp', 'Stamp generated successfully.');
+  const handleGenerateStamp = async (refImg: string) => {
+    if (!refImg) {
+      Alert.alert('Error', 'No image available for generating a stamp.');
+      return;
+    }
+  
+    // Show loading indicator
+    setIsLoading(true);
+  
+    const result = await genStamp(refImg);
+    
+    if (result) {
+      console.log('Stamp generated successfully:', result);
+      setStamp_url(result.image_url);
+      console.log(result.image_url);
+    } else {
+      Alert.alert('Error', 'Failed to generate the stamp.');
+    }
+  
+    // Hide loading indicator
+    setIsLoading(false);
   };
 
   const handleSavePage = async () => {
-    if (!imageUri) {
-      Alert.alert('Error', 'No image to save.');
+    const uid = await AsyncStorage.getItem('uid');
+
+    if (!uid) {
+      Alert.alert('Error', 'User ID not found.');
       return;
     }
-
-    const stampbook = stampbooks.find((sb) => sb.id === stampbookId);
-    if (stampbook) {
-      const existingPage = stampbook.pages.find((page: Page) => page.id === pageId);
-      if (existingPage) {
-        const updatedPage: Page = {
-          ...existingPage,
-          imageUri: imageUri,
-          notes: notes,
-          location: location,
-          stamped: true,
-          // Stamps are already handled via addStamp
-        };
-
-        updatePage(stampbookId, updatedPage);
-
-        Alert.alert('Success', 'Page saved successfully.');
-        router.back();
-      } else {
-        Alert.alert('Error', 'Page not found.');
-      }
+    const response = await uploadPhoto(photo_url);
+    if (response.download_url) {
+      setPhoto_url(response.download_url)
+    }
+    const result = await createStamp(uid, bookid, location_name, geocode, response.download_url, stamp_url, stamp_size, stamp_transformation, notes);
+    if (result) {
+      router.back();
+      Alert.alert("Saved!");
     } else {
-      Alert.alert('Error', 'Stampbook not found.');
+      Alert.alert("Save Failed");
     }
   };
+
+  useEffect(() => {
+    console.log('Current Stamp Transformations:', stamp_transformation);
+  }, [stamp_transformation]);
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#0000ff" />
+        <Text style={styles.loadingText}>Generating Stamp...</Text>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -176,11 +170,8 @@ const PageEditor: React.FC = () => {
               <Ionicons name="chevron-back-sharp" size={30} color="#000" />
             </TouchableOpacity>
             <Text style={styles.title}>Editing Page</Text>
-            {imageUri && (
-              <TouchableOpacity
-                style={styles.saveButton}
-                onPress={handleSavePage}
-              >
+            {stamp_url && (
+              <TouchableOpacity style={styles.saveButton} onPress={handleSavePage}>
                 <Text style={styles.saveButtonText}>Save</Text>
               </TouchableOpacity>
             )}
@@ -188,23 +179,24 @@ const PageEditor: React.FC = () => {
 
           {/* Content */}
           <View style={styles.content}>
-            {imageUri ? (
+            {photo_url ? (
               <View style={styles.imageContainer}>
-                <DraggableImage
-                  imageUri={imageUri}
-                  borderRadius={15}
-                  stamped={isPlaced}
-                  transformations={imageTransformations}
-                  onUpdateTransformations={(transform: Transformations) => {
-                    handleUpdateImageTransformations(transform)
-                  }}
-                />
+                <Image source={{ uri: photo_url }} style={styles.staticImage} />
+                { stamp_url ? (
+                  <View style={styles.imageOverlay}>
+                    <DraggableImage
+                      imageUri={stamp_url}
+                      borderRadius={15}
+                      transformations={stamp_transformation}
+                      onUpdateTransformations={(transform: Transformations) => handleUpdateStampTransformations(transform)}
+                    />
+                  </View>
+                ) : (
+                  <Text style={styles.errorText}>Failed to load stamp.</Text>
+                )}
               </View>
             ) : (
-              <TouchableOpacity
-                style={styles.cameraContainer}
-                onPress={handleTakePicture}
-              >
+              <TouchableOpacity style={styles.cameraContainer} onPress={handleTakePicture}>
                 <Feather name="camera" size={50} color="#000" />
               </TouchableOpacity>
             )}
@@ -221,45 +213,20 @@ const PageEditor: React.FC = () => {
               />
             </View>
           </View>
-
-          {/* Footer */}
-          <View style={styles.footer}>
-            {imageUri ? (
-              <>
-                {!isPlaced ? (
-                  <TouchableOpacity
-                    style={styles.placeButton}
-                    onPress={handlePlacePicture} // Call the place function
-                  >
-                    <Text style={styles.placeButtonText}>Place</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                style={styles.generateStampButton}
-                onPress={handleGenerateStamp}
-              >
-                <Text style={styles.generateStampButtonText}>Generate Stamp</Text>
-              </TouchableOpacity>
-                )}
-              </>
-            ) : (
-              <></>
-            )}
-          </View>
         </View>
       </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
   );
 };
 
-export default PageEditor;
+export default EmptyEditor;
 
 const { width } = Dimensions.get('window');
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f9f9f9', // White background
+    backgroundColor: '#f9f9f9',
   },
   innerContainer: {
     flex: 1,
@@ -273,12 +240,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   backButton: {
-    padding: 10,
+    paddingLeft: 10,
   },
   title: {
     fontSize: 18,
     fontWeight: 'bold',
     textAlign: 'center',
+    paddingRight: 30, // Adjust padding to center the title
   },
   saveButton: {
     padding: 10,
@@ -309,6 +277,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
+    width: '100%',
+  },
+  imageOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  staticImage: {
+    width: 350,
+    height: '90%',
+    borderRadius: 20,
   },
   notesContainer: {
     width: '100%',
@@ -324,30 +307,19 @@ const styles = StyleSheet.create({
     padding: 10,
     textAlignVertical: 'top',
   },
-  footer: {
-    paddingBottom: 50,
-    paddingHorizontal: 20,
-  },
-  placeButton: {
-    backgroundColor: '#2196F3',
-    padding: 15,
-    borderRadius: 8,
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor:'#f9f9f9'
   },
-  placeButtonText: {
-    color: 'white',
+  loadingText: {
+    marginTop: 20,
     fontSize: 16,
-    fontWeight: 'bold',
+    color: '#000',
   },
-  generateStampButton: {
-    backgroundColor: '#FF9800',
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  generateStampButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
+  errorText: {
+    color: 'red',
+    marginTop: 10,
   },
 });

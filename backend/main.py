@@ -1,5 +1,4 @@
 from collections import defaultdict
-from string import ascii_uppercase
 from typing import Union
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,10 +7,10 @@ import firebase_admin
 from firebase_admin import credentials, auth, db, storage
 from dotenv import load_dotenv
 import os
-from schemas import Book, Geocode, Location, Place, Stamp, Transformation
+from schemas import Book, Geocode, Location, Place, Size, Stamp, Transformation
 import base64
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi.encoders import jsonable_encoder
 from recommendation import get_place_names
 
@@ -60,6 +59,7 @@ class StampCreateRequest(BaseModel):
     geocode: Geocode
     photo_url: str
     stamp_url: str
+    stamp_size: Size
     stamp_transformation: Transformation
     notes: Union[str, None] = None
 
@@ -96,15 +96,20 @@ def create_user(user: UserCreateRequest):
 
 @app.post("/account/update")
 async def update_account(uid: str, update: UserUpdateRequest):
+    user_ref = db.reference(f"/users/{uid}")
+    updates = {}
+    
     if update.profile_photo:
-        db.reference(f"/users/{uid}/profile_photo").update(update.profile_photo)
+        updates['profile_photo'] = update.profile_photo
     
     if update.bio:
-        db.reference(f"/users/{uid}/bio").update(update.bio)
+        updates['bio'] = update.bio
+    
+    if updates:
+        user_ref.update(updates)
     
     return {
         "message": "User updated successfully",
-        "user_id": uid,
     }
 
 @app.post("/upload-photo")
@@ -112,9 +117,9 @@ async def upload_photo(file: UploadFile = File(...)):
     try:
         blob = bucket.blob(f"{file.filename}")
         blob.upload_from_file(file.file, content_type=file.content_type)
-        download_url = blob.public_url
+        url = blob.generate_signed_url(expiration=datetime.now() + timedelta(days=7))
 
-        return {"message": "Photo uploaded successfully", "download_url": download_url}
+        return {"message": "Photo uploaded successfully", "download_url": url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -153,20 +158,20 @@ async def create_book(request: BookCreateRequest):
         
         blob = bucket.blob(f"ai_generated_image_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
         blob.upload_from_string(image_data, content_type='image/png')
-        download_url = blob.public_url
+        url = blob.generate_signed_url(expiration=datetime.now() + timedelta(days=7))
 
         pages = None
         if request.attractions:
             pages = defaultdict(list)
             for attraction in request.attractions:
                 print(attraction)
-                starts_with = attraction.name[0].upper()
+                starts_with = attraction.location_name[0].upper()
                 pages[starts_with].append(
                     jsonable_encoder(attraction)
                 )
 
         book_data = Book(
-            cover=download_url,
+            cover=url,
             pages=pages,
             city=request.city,
             state=request.state
@@ -236,7 +241,7 @@ async def generate_stamp_image(reference_image: UploadFile = File(...)):
 
     data = {
         "model_name": "FLUX.1-dev",
-        "prompt": description,
+        "prompt": "Using this description, generate a fun sticker: " + description,
         "steps": 30,
         "cfg_scale": 5,
         "enable_refiner": False,
@@ -261,13 +266,13 @@ async def generate_stamp_image(reference_image: UploadFile = File(...)):
     try:
         blob = bucket.blob(f"ai_generated_image_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
         blob.upload_from_string(image_data, content_type='image/png')
-        download_url = blob.public_url
+        url = blob.generate_signed_url(expiration=datetime.now() + timedelta(days=7))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error uploading image to storage: {str(e)}")
     
     return {
         'message': 'Stamp successfully generated',
-        'image_url': download_url
+        'image_url': url
     }
 
 @app.post("/stampbook/create-stamp")
@@ -275,6 +280,7 @@ async def create_stamp(request: StampCreateRequest):
     stamp_data = Stamp(
         photo_url=request.photo_url,
         stamp_url=request.stamp_url,
+        stamp_size=request.stamp_size,
         stamp_transformation=request.stamp_transformation,
         date=datetime.now().strftime("%m/%d/%Y"),
         notes=request.notes,
@@ -286,7 +292,7 @@ async def create_stamp(request: StampCreateRequest):
     pages = ref.get()
 
     if pages is None:
-        pages = {letter: [] for letter in ascii_uppercase}
+        pages = defaultdict(list)
     
     first_letter = request.location_name[0].upper()
     pages[first_letter].append(jsonable_encoder(stamp_data))
@@ -299,9 +305,9 @@ async def create_stamp(request: StampCreateRequest):
     }
 
 @app.get("/travel/rec")
-async def travel_rec(city: str, state: str):
+async def travel_rec(city: str, state: str, query: Union[str, None] = None):
     try:
-        place_names = get_place_names(f"{city}, {state}")
+        place_names = get_place_names(f"{city}, {state}", query)
         
         output = {
             'places': []
@@ -328,18 +334,18 @@ async def travel_rec(city: str, state: str):
                 if places:
                     place_data = places[0]
                     
-                    display_name = place_data.get('displayName', {}).get('text', None)
-                    google_maps_uri = place_data.get('googleMapsUri', None)
-                    lat = place_data.get('location', {}).get('latitude', None)
-                    lng = place_data.get('location', {}).get('longitude', None)
-                    formatted_address = place_data.get('formattedAddress', None)
-                    rating = place_data.get('rating', None)
-                    photo_uri = None
+                    display_name = place_data.get('displayName', {}).get('text', "")
+                    google_maps_uri = place_data.get('googleMapsUri', "")
+                    lat = place_data.get('location', {}).get('latitude', -1)
+                    lng = place_data.get('location', {}).get('longitude', -1)
+                    formatted_address = place_data.get('formattedAddress', "")
+                    rating = place_data.get('rating', 0)
+                    photo_uri = ""
                     
                     if 'photos' in place_data and place_data['photos']:
                         author_attributions = place_data['photos'][0].get('authorAttributions', [])
                         if author_attributions:
-                            photo_uri = author_attributions[0].get('uri', None)
+                            photo_uri = author_attributions[0].get('uri', "")
 
                     if display_name and google_maps_uri and lat is not None and lng is not None:
                         output['places'].append(jsonable_encoder(
@@ -400,6 +406,21 @@ async def get_book_pages(uid: str, book_id: str):
         return {
             'message': f'Stampbook {book_id} for user: {uid}',
             'stampbook_pages': stampbook_pages
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get('/account/{uid}')
+async def get_account(uid: str):
+    try:
+        ref = db.reference(f"/users/{uid}")
+
+        user_info = ref.get()
+        
+        return {
+            'message': f'Retrieved information for user: {uid}',
+            'user_info': user_info
         }
     
     except Exception as e:

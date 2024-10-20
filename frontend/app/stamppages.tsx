@@ -1,31 +1,35 @@
-import React, { useEffect, useContext } from 'react';
+import React, { useEffect, useContext, useState } from 'react';
 import { Alert, StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import PageSpinner from '@/components/PageSpinner';
-import { PagesContext } from '../context/PagesContext';
+import SimpleBook from '@/components/SimpleBook';
 import { Stampbook } from '../models/Stampbook';
+import { useAccountContext } from '@/context/AccountContext';
+import { useAccount } from '@/hooks/useAccount';
 
 const StampPage: React.FC = () => {
   const router = useRouter();
-  const { stampbookId } = useLocalSearchParams<{ stampbookId: string }>();
-  const { stampbooks } = useContext(PagesContext);
+  const { index } = useLocalSearchParams<{ index: string }>()
+  const { accountData } = useAccountContext();
+  const { getAccountData } = useAccount();
+  const [ city, setCity ] = useState<string>("")
+  const [ state, setState ] = useState<string>("")
+
+  const books : Stampbook[]= accountData?.books || [];
+  const i = Number(index);
 
   useEffect(() => {
-    if (!stampbookId) {
-      Alert.alert('Error', 'No stampbook ID provided.');
+    if (isNaN(i) || i < 0 || i >= books.length) {
+      Alert.alert('Error', 'No valid stampbook index provided.');
       router.back();
       return;
     }
-
-    const stampbook = stampbooks.find((sb) => sb.id === stampbookId);
-    if (!stampbook) {
-      Alert.alert('Error', 'Stampbook not found.');
-      router.back();
-      return;
-    }
-  }, [stampbookId, stampbooks, router]);
+    setCity(books[i].city)
+    setState(books[i].state)
+    
+    }, [index, books, router]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -42,12 +46,15 @@ const StampPage: React.FC = () => {
             style={styles.backButton}
           />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>city, state</Text>
+        <View style={styles.headerTitle}>
+          <Text style={styles.title}>{city}</Text>
+          <Text style={styles.subtitle}>{state}</Text>
+        </View>
       </View>
 
       {/* Page Content */}
       <View style={styles.content}>
-        <PageSpinner stampbookId={stampbookId}/>
+        <SimpleBook index={i}/>
       </View>
     </SafeAreaView>
   );
@@ -75,11 +82,23 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     flex: 1,
     textAlign: 'center',
-    paddingRight: 30,
+    paddingRight: 40,
   },
   content: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginTop: 3,
+  },
+  subtitle: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
   },
 });

@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { View, StyleSheet, Text, ScrollView, Alert } from 'react-native';
 import DraggableImage from './DraggableImage';
-import { PagesContext } from '../context/PagesContext';
 import { Page } from '../models/Page';
 
 interface StampedPageProps {
@@ -10,7 +9,6 @@ interface StampedPageProps {
 }
 
 const StampedPage: React.FC<StampedPageProps> = ({ stampbookId, pageId }) => {
-  const { stampbooks } = useContext(PagesContext);
   const [page, setPage] = useState<Page | null>(null);
 
   useEffect(() => {

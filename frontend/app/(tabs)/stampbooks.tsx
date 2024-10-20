@@ -1,6 +1,6 @@
 // components/StampbookScreen.tsx
 
-import React, { useContext } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import {
   FlatList,
   Keyboard,
@@ -13,61 +13,58 @@ import {
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import Modal from 'react-native-modal';
-import { PagesContext } from '@/context/PagesContext';
 import { Stampbook } from '@/models/Stampbook';
+import { useAccountContext } from '@/context/AccountContext';
+import { useAccount } from '@/hooks/useAccount';
+import { City, useCitySearch } from '@/hooks/useCitySearch';
+import { createScrapbook } from '@/utils/endpoints';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { testStampbooks } from '@/data/testData';
+import { Image } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
 const modalWidth = screenWidth * 0.8;
 
-// Define the City interface
-interface City {
-  id: string;
-  city: string;
-  state: string;
-}
-
 const StampbookScreen: React.FC = () => {
-  const { stampbooks, addStampbook } = useContext(PagesContext);
   const [query, setQuery] = React.useState('');
-  const [filteredData, setFilteredData] = React.useState<Stampbook[]>(stampbooks);
-  const [modalVisible, setModalVisible] = React.useState(false);
-  const [modalSearchQuery, setModalSearchQuery] = React.useState('');
-  const [filteredModalCities, setFilteredModalCities] = React.useState<City[]>([]); // Updated type
-  const router = useRouter();
+  const { accountData } = useAccountContext();
+  const { getAccountData } = useAccount();
+  const [filteredData, setFilteredData] = useState<Stampbook[]>(accountData?.books || []);
+  const [modalVisible, setModalVisible] = useState(false);
+  const { searchCities, searchText, filteredCities} = useCitySearch();
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Define availableCities as City[]
-  const availableCities: City[] = [
-    { id: 'stampbook-4', city: 'New York', state: 'New York' },
-    { id: 'stampbook-5', city: 'Chicago', state: 'Illinois' },
-    // Add more cities as needed
-  ];
+  const books = accountData?.books || []
 
-  React.useEffect(() => {
-    setFilteredData(
-      stampbooks.filter(item =>
-        item.city.toLowerCase().includes(query.toLowerCase()) ||
-        item.state.toLowerCase().includes(query.toLowerCase())
-      )
-    );
-  }, [query, stampbooks]);
+  useEffect(() => {
+    onRefresh();
+  }, [])
 
-  const handleModalCitySearch = (text: string) => {
-    setModalSearchQuery(text);
-    const filtered: City[] = availableCities.filter(city =>
-      city.city.toLowerCase().includes(text.toLowerCase()) ||
-      city.state.toLowerCase().includes(text.toLowerCase())
-    );
-    setFilteredModalCities(filtered);
-  };
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await getAccountData();
+    setRefreshing(false);
+};
 
-  const closeModal = () => {
+  useEffect(() => {
+    setFilteredData(accountData?.books || [])
+  }, [accountData])
+
+  const closeModal = async () => {
     Keyboard.dismiss();
     setModalVisible(false);
   };
+
+  const handleSelectCity = async (city: City & { state: string }) => {
+    const uid = await AsyncStorage.getItem('uid')
+    await createScrapbook(uid || '', city.name, city.state);
+    closeModal();
+  }
 
   return (
     <View style={styles.container}>
@@ -78,7 +75,17 @@ const StampbookScreen: React.FC = () => {
             placeholder="Search Stampbooks"
             placeholderTextColor="#666"
             value={query}
-            onChangeText={setQuery}
+            onChangeText={(text) => {
+              setQuery(text)
+              if (text) {
+                setFilteredData(
+                  books.filter(item =>
+                    item.city.toLowerCase().includes(query.toLowerCase()) ||
+                    item.state.toLowerCase().includes(query.toLowerCase())
+                  )
+                );
+              }
+            }}
           />
           <TouchableOpacity style={styles.plusButton} onPress={() => setModalVisible(true)}>
             <Feather name="plus" size={24} color="white" />
@@ -91,9 +98,12 @@ const StampbookScreen: React.FC = () => {
         keyExtractor={item => item.id}
         numColumns={2}
         contentContainerStyle={[styles.bookGrid, { paddingBottom: 30 }]}
-        renderItem={({ item }) => (
-          <BookCover city={item.city} state={item.state} id={item.id} />
+        renderItem={({ item, index }) => (
+          <BookCover item={item} index={index} />
         )}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       />
 
       {/* Modal for Adding New Stampbook */}
@@ -120,29 +130,20 @@ const StampbookScreen: React.FC = () => {
               style={styles.modalSearchBar}
               placeholder="Enter City"
               placeholderTextColor="#ccc"
-              value={modalSearchQuery}
-              onChangeText={handleModalCitySearch}
+              value={searchText}
+              onChangeText={searchCities}
             />
           </View>
 
           <FlatList
-            data={filteredModalCities} // Correctly typed as City[]
-            keyExtractor={item => item.id}
+            data={filteredCities}
+            keyExtractor={item => item.id.toString()}
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={styles.suggestionItem}
-                onPress={() => {
-                  // Handle adding a new stampbook
-                  addStampbook({
-                    id: item.id,
-                    city: item.city,
-                    state: item.state,
-                    pages: [], // Include the 'pages' property
-                  });
-                  closeModal();
-                }}
+                onPress={() => handleSelectCity(item)}
               >
-                <Text style={styles.suggestionText}>{`${item.city}, ${item.state}`}</Text>
+                <Text style={styles.suggestionText}>{`${item.name}, ${item.state}`}</Text>
               </TouchableOpacity>
             )}
           />
@@ -152,13 +153,7 @@ const StampbookScreen: React.FC = () => {
   );
 };
 
-type BookCoverProps = {
-  city: string;
-  state: string;
-  id: string;
-};
-
-const BookCover: React.FC<BookCoverProps> = ({ city, state, id }) => {
+const BookCover: React.FC<{ item: Stampbook, index: number }> = ({ item, index }) => {
   const router = useRouter();
 
   return (
@@ -166,16 +161,17 @@ const BookCover: React.FC<BookCoverProps> = ({ city, state, id }) => {
       onPress={() => {
         router.push({
           pathname: '/stamppages',
-          params: { stampbookId: id },
+         params: { index: index },
         })
       }}
       style={styles.bookContainer}
     >
       <View style={styles.bookCover}>
+        <Image source={{uri: item.cover}} style={{flex: 1, width: "100%", height: "100%"}}/>
         <View style={styles.bookBinding} />
       </View>
-      <Text style={styles.title}>{city}</Text>
-      <Text style={styles.subtitle}>{state}</Text>
+      <Text style={styles.title}>{item.city}</Text>
+      <Text style={styles.subtitle}>{item.state}</Text>
     </TouchableOpacity>
   );
 };

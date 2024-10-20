@@ -1,7 +1,8 @@
+from typing import Union
 from groq import Groq
 from toolhouse import Toolhouse
 
-def get_place_names(location: str):
+def get_place_names(location: str, query: Union[str, None] = None):
     th = Toolhouse()
     
     client = Groq()
@@ -10,7 +11,7 @@ def get_place_names(location: str):
     messages = [
         {
             "role": "system",
-            "content": f"""Find a relevant website with attractions in {location}, then scrape from one website 5 attractions in {location}, 
+            "content": f"""Find a relevant website with attractions in {location} and about the keywords: {query}, then scrape from one website 5 attractions in {location}, 
             in a list format."""
         }
     ]

@@ -6,8 +6,8 @@ import { useEffect } from 'react';
 import 'react-native-reanimated';
 import { useColorScheme } from '@/hooks/useColorScheme';
 
-import { PagesProvider } from '@/context/PagesContext';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { AccountProvider } from '@/context/AccountContext';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -29,33 +29,33 @@ export default function RootLayout() {
   }
 
   return (
-    <SafeAreaProvider>
-      <PagesProvider>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <Stack>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="stamppages"
-              options={{
-                headerShown: false, 
-              }}
-            />
-            <Stack.Screen
-              name="emptyeditor"
-              options={{
-                headerShown: false, 
-              }}
-            />
-            <Stack.Screen
-              name="stampededitor"
-              options={{
-                headerShown: false, 
-              }}
-            />
-            <Stack.Screen name="+not-found" />
-          </Stack>
-        </ThemeProvider>
-      </PagesProvider>
-    </SafeAreaProvider>
+    <AccountProvider>
+      <SafeAreaProvider>
+          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+            <Stack screenOptions={{headerShown: false}}>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="stamppages"
+                options={{
+                  headerShown: false,
+                }}
+              />
+              <Stack.Screen
+                name="emptyeditor"
+                options={{
+                  headerShown: false,
+                }}
+              />
+              <Stack.Screen
+                name="stampededitor"
+                options={{
+                  headerShown: false,
+                }}
+              />
+              <Stack.Screen name="+not-found" />
+            </Stack>
+          </ThemeProvider>
+      </SafeAreaProvider>
+    </AccountProvider>
   );
 }

@@ -16,17 +16,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import DraggableImage from '../components/DraggableImage';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { PagesContext } from '../context/PagesContext';
 import { Page, Stamp } from '../models/Page';
-import uuid from 'react-native-uuid';
 import * as Location from 'expo-location';
 
 const PageEditor: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { pageId, stampbookId } = useLocalSearchParams<{ pageId: string; stampbookId: string }>();
-  const { stampbooks, updatePage, addPage, addStamp, addLocation } = useContext(PagesContext);
-
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [notes, setNotes] = useState<string>('');
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
